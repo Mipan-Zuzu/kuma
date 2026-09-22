@@ -3,47 +3,79 @@
 set -e
 
 echo "======================================"
-echo " Uptime Kuma + Cloudflare R2 Backup"
+echo " Uptime Kuma + Cloudflare R2"
+echo " Auto Restore + Auto Backup"
 echo "======================================"
 
-# Pastikan data directory tersedia
-mkdir -p /app/data
+DB_DIR="/app/db"
+DB_FILE="$DB_DIR/kuma.db"
 
-# Jalankan backup pertama setelah Kuma siap
-echo "[INFO] Starting Uptime Kuma..."
+mkdir -p "$DB_DIR"
 
-node server/server.js &
+# =========================================================
+# 1. AUTO RESTORE
+# =========================================================
+
+if [ ! -f "$DB_FILE" ]; then
+    echo "[RESTORE] kuma.db tidak ditemukan."
+    echo "[RESTORE] Mencari backup terbaru di R2..."
+
+    python3 /restore.py
+
+    if [ -f "$DB_FILE" ]; then
+        echo "[RESTORE] Database berhasil dipulihkan."
+    else
+        echo "[RESTORE] Tidak ada backup. Kuma akan membuat database baru."
+    fi
+else
+    echo "[RESTORE] kuma.db ditemukan. Tidak perlu restore."
+fi
+
+
+# =========================================================
+# 2. START UPTIME KUMA DENGAN ENTRYPOINT ASLINYA
+# =========================================================
+
+echo "[KUMA] Starting Uptime Kuma..."
+
+/usr/bin/dumb-init -- node server/server.js &
 KUMA_PID=$!
 
-echo "[INFO] Waiting for Uptime Kuma to start..."
 
-for i in {1..60}; do
-    if curl -fsS http://127.0.0.1:3001 > /dev/null 2>&1; then
-        echo "[INFO] Uptime Kuma is ready."
-        break
-    fi
+# =========================================================
+# 3. BACKUP SETELAH KUMA START
+# =========================================================
 
-    sleep 2
-done
+sleep 30
 
-# Backup pertama
-echo "[INFO] Running initial R2 backup..."
-python3 /backup.py || echo "[WARN] Initial backup failed."
+echo "[BACKUP] Running initial backup..."
 
-# Backup setiap 6 jam
+python3 /backup.py || \
+    echo "[BACKUP] Initial backup failed."
+
+
+# =========================================================
+# 4. BACKUP SETIAP 6 JAM
+# =========================================================
+
 (
     while true; do
         sleep 21600
 
-        echo "[INFO] Running scheduled R2 backup..."
-        python3 /backup.py || echo "[WARN] Scheduled backup failed."
+        echo "[BACKUP] Running scheduled backup..."
+
+        python3 /backup.py || \
+            echo "[BACKUP] Scheduled backup failed."
     done
 ) &
 
 BACKUP_PID=$!
 
-# Jika Kuma mati, container ikut mati
-wait $KUMA_PID
 
-# Bersihkan proses backup
-kill $BACKUP_PID 2>/dev/null || true
+# =========================================================
+# 5. TUNGGU KUMA
+# =========================================================
+
+wait "$KUMA_PID"
+
+kill "$BACKUP_PID" 2>/dev/null || true

@@ -1,4 +1,3 @@
-```python
 import os
 import sqlite3
 import tempfile
@@ -7,7 +6,6 @@ from datetime import datetime, timezone
 import boto3
 
 
-# Lokasi database Uptime Kuma pada image yang kamu gunakan
 DB_PATH = "/app/db/kuma.db"
 
 
@@ -22,14 +20,12 @@ def get_env(name):
     return value
 
 
-# Cloudflare R2 configuration
 R2_ENDPOINT = get_env("R2_ENDPOINT")
 R2_ACCESS_KEY_ID = get_env("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = get_env("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = get_env("R2_BUCKET")
 
 
-# R2 menggunakan S3-compatible API
 s3 = boto3.client(
     "s3",
     endpoint_url=R2_ENDPOINT,
@@ -53,11 +49,7 @@ def create_database_backup(destination):
         target = sqlite3.connect(destination)
 
         try:
-            # SQLite online backup.
-            # Lebih aman daripada sekadar copy kuma.db
-            # ketika Kuma sedang berjalan.
             source.backup(target)
-
         finally:
             target.close()
 
@@ -66,7 +58,6 @@ def create_database_backup(destination):
 
 
 def main():
-
     timestamp = datetime.now(
         timezone.utc
     ).strftime(
@@ -84,7 +75,6 @@ def main():
             "kuma.db"
         )
 
-        # Buat snapshot SQLite
         print(
             "[BACKUP] Creating SQLite snapshot..."
         )
@@ -93,7 +83,6 @@ def main():
             database_backup
         )
 
-        # Nama object di R2
         key = (
             f"backups/"
             f"kuma-{timestamp}.db"
@@ -103,7 +92,6 @@ def main():
             f"[BACKUP] Uploading to R2: {key}"
         )
 
-        # Upload ke Cloudflare R2
         s3.upload_file(
             database_backup,
             R2_BUCKET,
@@ -118,4 +106,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```

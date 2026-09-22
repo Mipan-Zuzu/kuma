@@ -1,30 +1,35 @@
+```python
 import os
 import sqlite3
 import tempfile
-import tarfile
 from datetime import datetime, timezone
 
 import boto3
 
 
-DATA_DIR = "/app/data"
+# Lokasi database Uptime Kuma pada image yang kamu gunakan
+DB_PATH = "/app/db/kuma.db"
 
 
 def get_env(name):
     value = os.getenv(name)
 
     if not value:
-        raise RuntimeError(f"Missing environment variable: {name}")
+        raise RuntimeError(
+            f"Missing environment variable: {name}"
+        )
 
     return value
 
 
+# Cloudflare R2 configuration
 R2_ENDPOINT = get_env("R2_ENDPOINT")
 R2_ACCESS_KEY_ID = get_env("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = get_env("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = get_env("R2_BUCKET")
 
 
+# R2 menggunakan S3-compatible API
 s3 = boto3.client(
     "s3",
     endpoint_url=R2_ENDPOINT,
@@ -35,18 +40,24 @@ s3 = boto3.client(
 
 
 def create_database_backup(destination):
-    source_path = os.path.join(DATA_DIR, "kuma.db")
+    if not os.path.exists(DB_PATH):
+        raise RuntimeError(
+            f"Database not found: {DB_PATH}"
+        )
 
-    if not os.path.exists(source_path):
-        raise RuntimeError("kuma.db not found")
+    print(f"[BACKUP] Source database: {DB_PATH}")
 
-    source = sqlite3.connect(source_path)
+    source = sqlite3.connect(DB_PATH)
 
     try:
         target = sqlite3.connect(destination)
 
         try:
+            # SQLite online backup.
+            # Lebih aman daripada sekadar copy kuma.db
+            # ketika Kuma sedang berjalan.
             source.backup(target)
+
         finally:
             target.close()
 
@@ -54,53 +65,17 @@ def create_database_backup(destination):
         source.close()
 
 
-def create_archive(archive_path, database_backup):
-    files = [
-        "db-config.json",
-        "docker-tls",
-        "screenshots",
-        "upload",
-    ]
-
-    with tarfile.open(archive_path, "w:gz") as tar:
-
-        # Consistent SQLite backup
-        tar.add(
-            database_backup,
-            arcname="kuma.db"
-        )
-
-        # Additional Kuma data
-        for name in files:
-
-            path = os.path.join(DATA_DIR, name)
-
-            if os.path.exists(path):
-                tar.add(
-                    path,
-                    arcname=name
-                )
-
-
-def upload_backup(archive_path, timestamp):
-    key = f"backups/kuma-{timestamp}.tar.gz"
-
-    s3.upload_file(
-        archive_path,
-        R2_BUCKET,
-        key,
-    )
-
-    return key
-
-
 def main():
 
-    timestamp = datetime.now(timezone.utc).strftime(
+    timestamp = datetime.now(
+        timezone.utc
+    ).strftime(
         "%Y-%m-%d_%H-%M-%S"
     )
 
-    print(f"[BACKUP] Starting backup: {timestamp}")
+    print(
+        f"[BACKUP] Starting backup: {timestamp}"
+    )
 
     with tempfile.TemporaryDirectory() as temp:
 
@@ -109,35 +84,38 @@ def main():
             "kuma.db"
         )
 
-        archive_path = os.path.join(
-            temp,
-            f"kuma-{timestamp}.tar.gz"
+        # Buat snapshot SQLite
+        print(
+            "[BACKUP] Creating SQLite snapshot..."
         )
-
-        print("[BACKUP] Creating SQLite snapshot...")
 
         create_database_backup(
             database_backup
         )
 
-        print("[BACKUP] Creating archive...")
-
-        create_archive(
-            archive_path,
-            database_backup
-        )
-
-        print("[BACKUP] Uploading to Cloudflare R2...")
-
-        key = upload_backup(
-            archive_path,
-            timestamp
+        # Nama object di R2
+        key = (
+            f"backups/"
+            f"kuma-{timestamp}.db"
         )
 
         print(
-            f"[BACKUP] SUCCESS: s3://{R2_BUCKET}/{key}"
+            f"[BACKUP] Uploading to R2: {key}"
+        )
+
+        # Upload ke Cloudflare R2
+        s3.upload_file(
+            database_backup,
+            R2_BUCKET,
+            key,
+        )
+
+        print(
+            "[BACKUP] SUCCESS: "
+            f"s3://{R2_BUCKET}/{key}"
         )
 
 
 if __name__ == "__main__":
     main()
+```

@@ -6,8 +6,16 @@ from datetime import datetime, timezone
 import boto3
 
 
-DB_PATH = "/app/db/kuma.db"
+# =========================================================
+# CONFIG
+# =========================================================
 
+DB_PATH = "/app/data/kuma.db"
+
+
+# =========================================================
+# ENVIRONMENT
+# =========================================================
 
 def get_env(name):
     value = os.getenv(name)
@@ -26,6 +34,10 @@ R2_SECRET_ACCESS_KEY = get_env("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = get_env("R2_BUCKET")
 
 
+# =========================================================
+# R2 CLIENT
+# =========================================================
+
 s3 = boto3.client(
     "s3",
     endpoint_url=R2_ENDPOINT,
@@ -35,29 +47,52 @@ s3 = boto3.client(
 )
 
 
+# =========================================================
+# SQLITE BACKUP
+# =========================================================
+
 def create_database_backup(destination):
+
     if not os.path.exists(DB_PATH):
         raise RuntimeError(
             f"Database not found: {DB_PATH}"
         )
 
-    print(f"[BACKUP] Source database: {DB_PATH}")
+    print(
+        f"[BACKUP] Source database: {DB_PATH}"
+    )
 
-    source = sqlite3.connect(DB_PATH)
+    source = sqlite3.connect(
+        DB_PATH
+    )
 
     try:
-        target = sqlite3.connect(destination)
+
+        target = sqlite3.connect(
+            destination
+        )
 
         try:
-            source.backup(target)
+
+            source.backup(
+                target
+            )
+
         finally:
+
             target.close()
 
     finally:
+
         source.close()
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 def main():
+
     timestamp = datetime.now(
         timezone.utc
     ).strftime(
@@ -95,14 +130,18 @@ def main():
         s3.upload_file(
             database_backup,
             R2_BUCKET,
-            key,
+            key
         )
 
         print(
-            "[BACKUP] SUCCESS: "
+            f"[BACKUP] SUCCESS: "
             f"s3://{R2_BUCKET}/{key}"
         )
 
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
     main()
